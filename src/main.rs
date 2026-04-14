@@ -179,8 +179,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let context = Context::new()?;
 
-    let mut handle = open_device(&context, vid, pid)
-        .expect("Can't open USB device");
+    let handle = open_device(&context, vid, pid)
+                    .expect("Can't open USB device");
 
     handle.set_auto_detach_kernel_driver(true).ok();
     handle.claim_interface(INTERFACE)?;
@@ -212,7 +212,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     let mut data = [0u8; PACKET_SIZE];
-    let mut last_data = [0u8; PACKET_SIZE];
     let mut prev = [0u8; 4];
     let mut counter: u32 = 0;
 
