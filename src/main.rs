@@ -1,5 +1,5 @@
 use rusb::{Context, DeviceHandle, UsbContext};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -17,7 +17,7 @@ const PACKET_SIZE: usize = 32;
 // ==============================
 // 🎮 MODE
 // ==============================
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
 enum Mode {
     Normal,
     SteamDeck,
