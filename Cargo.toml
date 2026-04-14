@@ -1,0 +1,19 @@
+[package]
+name = "legos-extra-buttons"
+version = "1.0.0"
+authors = ["Baco"]
+edition = "2021"
+keywords = ["evdev"]
+categories = ["command-line-utilities"]
+links = "evdev"
+rust-version = "1.63"
+
+[dependencies]
+clap = { version = "3.2", features = ["derive"] }
+rusb = "0.9"
+evdev = "0.12"
+ctrlc = "3"
+
+[profile.release]
+panic = "unwind"
+lto = true
