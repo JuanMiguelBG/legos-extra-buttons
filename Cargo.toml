@@ -10,7 +10,7 @@ rust-version = "1.63"
 [dependencies]
 clap = { version = "3.2", features = ["derive"] }
 rusb = "0.9"
-evdev = "0.12"
+evdev = "0.11"
 ctrlc = "3"
 
 [profile.release]

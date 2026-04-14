@@ -1,4 +1,4 @@
-use rusb::{Context, DeviceHandle};
+use rusb::{Context, DeviceHandle, UsbContext};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -27,7 +27,7 @@ enum Mode {
 // 📥 CLI
 // ==============================
 #[derive(Parser)]
-#[clap(author, version, about = "USB HID → evdev bridge")]
+#[clap(author, version, about = "LEGOS Extra Buttons Handler")]
 struct Args {
     #[clap(short = 'e', long = "ep")]
     evdev_path: Option<String>,
@@ -99,20 +99,12 @@ fn find_evdev_device(
             Err(_) => continue,
         };
 
-        // =========================
-        // 🎯 VID / PID FILTER
-        // =========================
-        if let Some(id) = dev.input_id() {
-            if id.vendor() != vid || id.product() != pid {
-                continue;
-            }
-        } else {
+        let id = dev.input_id();
+
+        if id.vendor() != vid || id.product() != pid {
             continue;
         }
 
-        // =========================
-        // 🏷️ NAME FILTER (optional)
-        // =========================
         if let Some(name) = dev.name() {
             if !device_name.is_empty() && name != device_name {
                 continue;
@@ -131,13 +123,13 @@ fn find_evdev_device(
 // ==============================
 // 🔌 USB OPEN
 // ==============================
-fn open_device(context: &Context) -> Option<DeviceHandle<Context>> {
+fn open_device(context: &Context, vid: u16, pid: u16) -> Option<DeviceHandle<Context>> {
     let devices = context.devices().ok()?;
 
     for device in devices.iter() {
         let desc = device.device_descriptor().ok()?;
 
-        if desc.vendor_id() == 0x1a86 && desc.product_id() == 0xe310 {
+        if desc.vendor_id() == vid && desc.product_id() == pid {
             return device.open().ok();
         }
     }
@@ -164,35 +156,12 @@ fn emit_evdev(
         Mode::Normal => (Key::BTN_BASE, Key::BTN_MODE),
     };
 
-    events.push(InputEvent::new(
-        EventType::KEY,
-        legion_key.code(),
-        legion as i32,
-    ));
+    events.push(InputEvent::new(EventType::KEY, legion_key.code(), legion as i32));
+    events.push(InputEvent::new(EventType::KEY, qa_key.code(), qa as i32));
+    events.push(InputEvent::new(EventType::KEY, Key::BTN_TRIGGER_HAPPY5.code(), y2 as i32));
+    events.push(InputEvent::new(EventType::KEY, Key::BTN_TRIGGER_HAPPY7.code(), y1 as i32));
 
-    events.push(InputEvent::new(
-        EventType::KEY,
-        qa_key.code(),
-        qa as i32,
-    ));
-
-    events.push(InputEvent::new(
-        EventType::KEY,
-        Key::BTN_TRIGGER_HAPPY5.code(),
-        y2 as i32,
-    ));
-
-    events.push(InputEvent::new(
-        EventType::KEY,
-        Key::BTN_TRIGGER_HAPPY7.code(),
-        y1 as i32,
-    ));
-
-    events.push(InputEvent::new(
-        EventType::SYNCHRONIZATION,
-        0,
-        0,
-    ));
+    events.push(InputEvent::new(EventType::SYNCHRONIZATION, 0, 0));
 
     dev.send_events(&events)?;
 
@@ -208,12 +177,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let vid = parse_u16_hex(&args.vid)?;
     let pid = parse_u16_hex(&args.pid)?;
 
-    // ==============================
-    // 🔌 USB INIT
-    // ==============================
     let context = Context::new()?;
 
-    let mut handle = open_device(&context)
+    let mut handle = open_device(&context, vid, pid)
         .expect("Can't open USB device");
 
     handle.set_auto_detach_kernel_driver(true).ok();
@@ -221,9 +187,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("USB OK");
 
-    // ==============================
-    // 🎮 EVDEV SELECTION
-    // ==============================
     let evdev_path = match args.evdev_path {
         Some(p) => p,
         None => {
@@ -239,18 +202,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut dev = Device::open(&evdev_path)?;
     println!("evdev open: {}", evdev_path);
 
-    match args.mode {
-        Mode::SteamDeck => println!("Mode: STEAM_DECK"),
-        Mode::Normal => println!("Mode: NORMAL"),
-    }
+    println!("Mode: {:?}", args.mode);
 
-    if args.verbose { println!("Verbose ON"); }
-    if args.trace { println!("Trace ON"); }
-    if args.raw { println!("RAW ON"); }
-
-    // ==============================
-    // 🛑 CTRL+C
-    // ==============================
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
 
@@ -258,9 +211,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         r.store(false, Ordering::SeqCst);
     })?;
 
-    // ==============================
-    // 🔁 LOOP
-    // ==============================
     let mut data = [0u8; PACKET_SIZE];
     let mut last_data = [0u8; PACKET_SIZE];
     let mut prev = [0u8; 4];
@@ -272,46 +222,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match handle.read_interrupt(ENDPOINT, &mut data, TIMEOUT) {
             Ok(len) => {
                 counter += 1;
-
                 let ignored = counter % args.ignore != 0;
 
-                // =========================
-                // 🔍 VERBOSE
-                // =========================
-                if args.verbose && (!ignored || args.raw) {
-                    print!("RX [{}]: ", len);
-                    for b in &data[..len] {
-                        print!("{:02X} ", b);
-                    }
-                    println!();
-                }
-
-                // =========================
-                // 🧠 TRACE
-                // =========================
-                if args.trace && (!ignored || args.raw) && data[..len] != last_data[..len] {
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap();
-
-                    print!("[{}.{:03}] ", now.as_secs(), now.subsec_millis());
-
-                    for i in 0..len {
-                        if data[i] != last_data[i] {
-                            print!("[{:02X}] ", data[i]);
-                        } else {
-                            print!("{:02X} ", data[i]);
-                        }
-                    }
-
-                    println!();
-
-                    last_data[..len].copy_from_slice(&data[..len]);
-                }
-
-                // =========================
-                // ⛔ IGNORE LOGIC
-                // =========================
                 if ignored && !args.raw {
                     continue;
                 }
@@ -332,14 +244,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let current = [legion, quick_access, y2, y1];
 
                 if current != prev {
-                    emit_evdev(
-                        &mut dev,
-                        legion,
-                        quick_access,
-                        y2,
-                        y1,
-                        args.mode,
-                    )?;
+                    emit_evdev(&mut dev, legion, quick_access, y2, y1, args.mode)?;
                     prev = current;
                 }
             }
