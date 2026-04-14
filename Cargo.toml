@@ -5,7 +5,6 @@ authors = ["Baco"]
 edition = "2021"
 keywords = ["evdev"]
 categories = ["command-line-utilities"]
-links = "evdev"
 rust-version = "1.63"
 
 [dependencies]
